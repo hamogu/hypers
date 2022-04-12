@@ -75,9 +75,6 @@ class AstroService():
     @property
     def ra(self):
         'Get names of first column that looks like a RA'
-        if self.table is None:
-            raise TableNotLoadedError(f'Data table for {self.name} not yet loaded.')
-
         for col in self.table.columns:
             if 'ra' in col or 'RA' in col:
                 return col
@@ -88,9 +85,6 @@ class AstroService():
     @property
     def dec(self):
         'Get name of first column that looks like a DEC'
-        if self.table is None:
-            raise TableNotLoadedError(f'Data table for {self.name} not yet loaded.')
-
         for col in self.table.columns:
             if 'de' in col or 'DE' in col:
                 return col
@@ -154,9 +148,6 @@ class AstroService():
     @table_present
     @skip_if_empty
     def plot(self, ax, **kwargs):
-        if self.table is None:
-            raise TableNotLoadedError(f'Data table for {self.name} not yet loaded.')
-
         kwargs = markerdefaults | self.markerargs | kwargs
         ax.scatter(self.table[self.ra], self.table[self.dec], 
                    transform=ax.get_transform('icrs'),  label=self.name, **kwargs)
@@ -208,7 +199,7 @@ class MAST(AstroService):
 class Simbad(AstroService):
     service = aSimbad
     name = 'Simbad'
-    ra = 'RA_d'  # not in default SImbad return values, but added with 'coo(d)1 in __init__
+    ra = 'RA_d'  # not in default Simbad return values, but added with 'coo(d)1 in __init__
     dec = 'DEC_d'
 
     def __init__(self, *args, **kwargs):
@@ -253,6 +244,7 @@ class Simbad(AstroService):
             ax.scatter(self.table['RA_d'][ind], self.table['DEC_d'][ind], c='k', transform=trans,
                     facecolors='none', s=150, 
                     label=f'{self.name} 50 < n_ref')
+
 
 class ALMA(AstroService):
     service = Alma
