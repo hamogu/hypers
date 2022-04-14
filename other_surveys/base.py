@@ -189,7 +189,7 @@ class MAST(AstroService):
         table = table[table['obs_collection'] != 'GALEX']
         table = table[~((table['proposal_id'] == '15888') & (table['obs_collection'] == 'HST'))]
         ### Add our other program ID here!!!
-        table = table[~((table['proposal_id'] == '15888') & (table['obs_collection'] == 'HST'))]
+        table = table[~((table['proposal_id'] == '16359') & (table['obs_collection'] == 'HST'))]
         table_grouped = table.group_by('obs_collection')
         for key, group in zip(table_grouped.groups.keys, table_grouped.groups):
             out += f'  {key["obs_collection"]}: {len(group)}\n'
