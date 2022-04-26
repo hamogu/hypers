@@ -71,8 +71,8 @@ class AstroService():
     table = None
     'Data table'
 
-    @table_present
     @property
+    @table_present
     def ra(self):
         'Get names of first column that looks like a RA'
         for col in self.table.columns:
@@ -81,8 +81,8 @@ class AstroService():
         else:
             raise KeyError('No column looks like a RA.')
 
-    @table_present
     @property
+    @table_present
     def dec(self):
         'Get name of first column that looks like a DEC'
         for col in self.table.columns:
