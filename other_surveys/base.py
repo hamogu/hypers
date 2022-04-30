@@ -6,15 +6,16 @@ For each catalog or service (e.g. Simbad, the 4XMM catalog, ...) we define one c
 Each of those derives from a base class called `AstroService` with three main functionalities:
 
 - query on web or, if present, load result of existing query from disk
-- prodice short, meaningful descritpion of query result
+- produce short, meaningful description of query result
 - add symbols to a plot
 
 For each query, we derive from that base class and change a few details, e.g. the plotting symbol.
 Simple changes can be made by a simple declaration by just defining a few class attributes, more
-complex changes can be done by overrriding the query or plot method.
+complex changes can be done by overriding the query or plot method.
 '''
 import os
 import functools
+import datetime
 
 from astropy.table import Table
 import astropy.units as u
@@ -27,18 +28,20 @@ from astroquery.nrao import Nrao
 from astroquery.mast import Observations as Mast
 from astroquery.casda import Casda  #  Australian Square Kilometre Array Pathfinder (ASKAP)
 from astroquery.vizier import Vizier
+Vizier.ROW_LIMIT == -1
 from astroquery.utils.commons import TableList
+from astroquery.eso import Eso
 
 markerdefaults = {'s': 100, 'facecolor': 'none'}
 
 
 class TableNotLoadedError(Exception):
-    '''No data table has be obtained through query or loading yet'''
+    '''No data table has been obtained through query or loading yet'''
     pass
 
 
 def table_present(func):
-    '''Decorator to check is a table have been loaded'''
+    '''Decorator to check if a table has been loaded'''
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
         if self.table is None:
@@ -48,10 +51,11 @@ def table_present(func):
 
 
 def skip_if_empty(func):
-    '''Skip a function if the table of sources is empty'''
+    '''Decorator to skip a function if the table of sources is empty'''
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
         if len(self.table) == 0:
+            print(f"Zero lines in {self.name} data table!")
             return
         else:
             return func(self, *args, **kwargs)
@@ -103,12 +107,14 @@ class AstroService():
         return f' {len(self.table)}\n'
 
     def __init__(self, name=None):
+#        print(self.name)
         if self.name is None:
             self.name = self.service.__class__.__name__
-
+            
     @table_present
     def write(self, directory):
         'Write data table to directory. File name and format are fixed to name.ecsv'
+        self.table.meta['DATE'] = datetime.datetime.now().strftime("%Y-%m-%d")
         self.table.write(os.path.join(directory, self.name + '.ecsv'))
 
     def read(self, directory):
@@ -141,22 +147,24 @@ class AstroService():
         '''Read file with data is present or perform astroquery is not'''
         try:
             self.read(directory)
-        except FileNotFoundError:
-            self.query(center)
-            self.write(directory)
+        except (FileNotFoundError, StopIteration) as e:
+            if type(e) == FileNotFoundError:
+                self.query(center)
+                self.write(directory)
+            else:
+                self.table = Table()
 
     @table_present
     @skip_if_empty
     def plot(self, ax, **kwargs):
         kwargs = markerdefaults | self.markerargs | kwargs
         ax.scatter(self.table[self.ra], self.table[self.dec], 
-                   transform=ax.get_transform('icrs'),  label=self.name, **kwargs)
+                   transform=ax.get_transform('icrs'), label=self.name, **kwargs)
 
 class VCatalog(AstroService):
     service = Vizier
-
     def query(self, center):
-        self.table = Vizier.query_region(center, radius=self.radius, catalog=self.catalog)
+        self.table = Vizier.query_region(center, width=self.radius, catalog=self.catalog, ROW_LIMIT=-1)
         if len(self.table) == 0:
             # Empty table List -- no match
             self.table = Table()
@@ -169,8 +177,11 @@ class VCatalog(AstroService):
 class MAST(AstroService):
 
     service = Mast
+    name = 'MAST' # already initiated in the __init__ function in astroservice
+    markerargs = {'s': 100, 'edgecolor': (.5, 0, 0), 'marker': 'o'}
 
     @table_present
+    @skip_if_empty
     def description(self):
 
         table = self.table  # just save some typing in the lines below...
@@ -183,17 +194,30 @@ class MAST(AstroService):
         if 'GALEX' in table['obs_collection']:
             out += '  GALEX: yes\n'
         else:
-            out += '  GALEX: no'
+            out += '  GALEX: no\n'
         
         table = table[table['obs_collection'] != 'TESS']
         table = table[table['obs_collection'] != 'GALEX']
+        ### Remove services from our two HST program IDs here!!!
         table = table[~((table['proposal_id'] == '15888') & (table['obs_collection'] == 'HST'))]
-        ### Add our other program ID here!!!
         table = table[~((table['proposal_id'] == '16359') & (table['obs_collection'] == 'HST'))]
         table_grouped = table.group_by('obs_collection')
         for key, group in zip(table_grouped.groups.keys, table_grouped.groups):
             out += f'  {key["obs_collection"]}: {len(group)}\n'
         return out
+
+#    @property
+#    @table_present
+#    def plot(self, ax, **kwargs):
+#        kwargs = markerdefaults | self.markerargs | kwargs
+#        trans = ax.get_transform('icrs')
+#        for row in self.table:
+#            print(row['s_ra'], row['s_dec'])
+#            print(len(row))
+#            print(row.info())
+#            coord = SkyCoord(row['s_ra'] + ' ' + row['s_dec'], unit=(u.hourangle, u.deg))
+#        ax.scatter(self.table['s_ra'], self.table['s_dec'], c='k',
+#                   transform=trans, label=self.name, **kwargs)
 
 
 class Simbad(AstroService):
@@ -223,7 +247,7 @@ class Simbad(AstroService):
             name = row['MAIN_ID']
             if (row['BIBLIST'] < 50) & (len(name) > 10):
                 name = name[:5] + '...'
-            ax.text(coord.ra.deg, coord.dec.deg, name, transform=trans)
+            ax.text(coord.ra.deg, coord.dec.deg, name, transform=trans, fontsize=12)
         
         # Three catagories with hardcoded boundaries.
         # Could be made more general, but for just three is the easist to just copy and paste
@@ -231,43 +255,85 @@ class Simbad(AstroService):
         if ind.sum() > 0:
             ax.scatter(self.table['RA_d'][ind], self.table['DEC_d'][ind], c='k', transform=trans,
                     facecolors='none', s=25, 
-                    label=f'{self.name} n_ref < 10')
+                    label=f'{self.name} (n < 10)')
         
         ind = (self.table['BIBLIST'] >= 10) & (self.table['BIBLIST'] < 50)
         if ind.sum() > 0:
             ax.scatter(self.table['RA_d'][ind], self.table['DEC_d'][ind], c='k', transform=trans,
                     facecolors='none', s=75, 
-                    label=f'{self.name} 10 < n_ref < 50')
+                    label=f'{self.name} (10 < n < 50)')
 
         ind = self.table['BIBLIST'] > 50
         if ind.sum() > 0:
             ax.scatter(self.table['RA_d'][ind], self.table['DEC_d'][ind], c='k', transform=trans,
                     facecolors='none', s=150, 
-                    label=f'{self.name} 50 < n_ref')
+                    label=f'{self.name} (n > 50)')
+                    
 
+class ESO(AstroService):
+    service = Eso()
+    service.login("abinks", store_password=True)
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Overwriting class level variable "service" with an actual
+        # instance of that class that is specific to this object
+        self.service = self.service()
+        self.mission = self.mission
+        self.name = self.name
 
-class ALMA(AstroService):
-    service = Alma
-    name = 'ALMA'
-    markerargs = {'s': 100}
-
-
+    def query(self, center):
+        self.table = self.service.query_instrument(self.mission,coord1=center.ra.deg, coord2=center.dec.deg, box=2./60)
+        if self.table is None:
+        # Empty table List -- no match
+            self.table = Table()
+        elif self.table is not None:
+            self.table = self.table
+        else:
+            raise Exception("No idea what this means... Check query!")
+            
 class RXS2(VCatalog):
     catalog = 'J/A+A/588/A103/cat2rxs'
     name = '2RXS'  # differs from class name, because class names can't start with numbers
-    markerargs = {'edgecolor':'r', 'marker': '^'}
-
+    markerargs = {'edgecolor':'xkcd:azure', 'marker': '^'}
 
 class XMM4(VCatalog):
     catalog = 'IX/59'
     name = '4XMM'  # differs from class name, because class names can't start with numbers
-    markerargs = {'edgecolor': (.7, 0, 0), 'marker': '>'}
+    markerargs = {'edgecolor':'xkcd:crimson', 'marker': '^'}
 
 class CSC2(VCatalog):
     catalog = 'IX/57/csc2master'
-    markerargs = {'edgecolor': (.3, 0, 0), 'marker': '<'}
-
+    name = 'CSC2'
+    markerargs = {'edgecolor':'xkcd:dark green', 'marker': '^'}
 
 class IPHAS(VCatalog):
     catalog = 'II/321/iphas2'
-    markerargs = {'edgecolor': 'xkcd:vivid purple', 'marker': '*'}
+    name = 'IPHAS'
+    markerargs = {'edgecolor': 'xkcd:azure', 'marker': '*'}
+    
+class GaiaEDR3(VCatalog):
+    catalog = 'I/350/gaiaedr3'
+    name = 'GaiaEDR3'
+    markerargs = {'edgecolor': 'xkcd:crimson', 'marker': '*'}
+    
+class giraffe(ESO):
+    mission = 'giraffe'
+    name = 'ESO_giraffe'
+    markerargs = {'edgecolor': 'xkcd:azure', 'marker': 'D'}
+
+class uves(ESO):
+    mission = 'uves'
+    name = 'ESO_uves'
+    markerargs = {'edgecolor': 'xkcd:crimson', 'marker': 'D'}
+
+class xshooter(ESO):
+    mission = 'xshooter'
+    name = 'ESO_xshooter'
+    markerargs = {'edgecolor': 'xkcd:dark green', 'marker': 'D'}
+    
+class ALMA(AstroService):
+    service = Alma
+    name = 'ALMA'
+    markerargs = {'edgecolor': 'xkcd:azure', 'marker': 'H'}
+
